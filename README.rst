@@ -1,0 +1,88 @@
+iframe-playlist-generator
+=========================
+
+HLS `I-frame playlist`_ generator
+
+Documentation
+=============
+
+Generate I-frame playlists and an updated variant master playlist from a url::
+
+    from iframeplaylistgenerator import *
+
+    playlist_data = update_for_iframes('http://videoserver.com/playlist.m3u8')
+
+Data Format
+-----------
+
+The function ``update_for_iframes`` returns a standard python dictionary with these keys:
+
+- ``master_uri``: the uri of the master playlist, ex.: "playlist.m3u8"
+- ``master_content``: the content of the updated master playlist, ex.::
+
+    """    
+    #EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=400000,CODECS="avc1.4d001f, mp4a.40.5"\nvideo-400k.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=150000,CODECS="avc1.4d001f, mp4a.40.5"\nvideo-150k.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.5"\n
+    video-64k.m3u8\n#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=83598,CODECS="avc1.4d001f",URI="video-400k-iframes.m3u8"\n#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=38775,CODECS="avc1.4d001f",URI="video-150k-iframes.m3u8"\n
+    """
+
+- ``iframe_playlists``: a list of dictionaries, each with a uri and content for each generated I-frame playlist, ex.: [{'uri': 'video-400k-iframes.m3u8', 'content': '#EXTM3U\n...'}, ...]
+
+Using the Data
+--------------
+
+The returned data can be used as needed, such as uploading the playlists to an s3 bucket::
+
+    import s3
+
+    MOBILE_ENCODING_FORMAT = 'application/x-mpegURL'
+    S3_BUCKET_PATH = 'http://s3.amazonaws.com/my_bucket/'
+
+    master_playlist_url = S3_BUCKET_PATH + playlist_data['master_uri']
+    master_playlist_content = playlist_data['master_content']
+    s3.upload_file_to_s3(
+        master_playlist_content,
+        MOBILE_ENCODING_FORMAT,
+        master_playlist_url
+    )
+
+    for playlist in playlist_data['iframe_playlists']:
+        iframe_playlist_url = S3_BUCKET_PATH + playlist['uri']
+        iframe_playlist_content = playlist['content']
+        s3.upload_file_to_s3(
+            iframe_playlist_content,
+            MOBILE_ENCODING_FORMAT,
+            iframe_playlist_url
+        )
+
+Alternate Usage
+---------------
+
+Alternatively, use the function ``create_iframe_playlist`` and pass it an `m3u8`_ ``Playlist`` object to generate an I-frame playlist for that specific stream. This function returns a tuple containing an `m3u8`_ ``IFramePlaylist`` object pointing to the new I-frame playlist, and a dictionary with these keys:
+
+- ``uri``: the uri of the I-frame playlist, ex.: "video-400k-iframes.m3u8"
+- ``content``: the content of the I-frame playlist, ex.: "#EXTM3U\n..."
+
+FFmpeg Installation
+===================
+
+In order to use the current version of iframe-playlist-generator, you must have `FFmpeg`_ installed with libx264 and libfdk_aac. For instructions, use the FFmpeg `compilation guide`_ for your specific OS.
+
+Alternatively, on Mac OS X the `Homebrew`_ package manager can be used to install FFmpeg. To install Homebrew on a Mac, run::
+
+    ruby -e "$(curl -fsSL https://raw.github.com/Homebrew/homebrew/go/install)"
+
+To install ffmpeg with Homebrew, run::
+
+    brew install ffmpeg
+
+License
+=======
+
+This module is Copyright 2014 PBS.org and is available under the `Apache License, Version 2.0`_.
+
+.. _I-frame playlist: http://tools.ietf.org/html/draft-pantos-http-live-streaming-08#section-3.4.12
+.. _m3u8: https://github.com/peter-norton/m3u8/
+.. _FFmpeg: https://ffmpeg.org/index.html
+.. _compilation guide: https://trac.ffmpeg.org/wiki/CompilationGuide
+.. _Homebrew: http://brew.sh
+.. _Apache License, Version 2.0: http://www.apache.org/licenses/LICENSE-2.0
