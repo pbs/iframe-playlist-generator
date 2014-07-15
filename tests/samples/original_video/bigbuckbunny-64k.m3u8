@@ -1,0 +1,14 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0000,
+bigbuckbunny-64k-00001.aac
+#EXTINF:10.0000,
+bigbuckbunny-64k-00002.aac
+#EXTINF:10.0000,
+bigbuckbunny-64k-00003.aac
+#EXTINF:2.4400,
+bigbuckbunny-64k-00004.aac
+
+#EXT-X-ENDLIST

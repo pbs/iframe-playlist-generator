@@ -5,19 +5,26 @@ creates an updated master playlist with links to the new I-frame playlists.
 
 import subprocess
 import json
-import logging
-import urllib2
 
 import m3u8
 
-LOGGER = logging.getLogger(__name__)
+from .exceptions import (
+    PlaylistLoadError, BadPlaylistError,
+    DependencyError, DataError
+)
 
 def update_for_iframes(url):
     """
     Returns an updated master playlist and new I-frame playlists
     """
-    url = urllib2.urlopen(url).geturl()
-    master_playlist = m3u8.load(url)
+    try:
+        master_playlist = m3u8.load(url)
+    except IOError:
+        raise PlaylistLoadError('Invalid url')
+
+    if not master_playlist.is_variant:
+        raise BadPlaylistError('Not a variant playlist')
+
     master_playlist.iframe_playlists[:] = []
 
     uri = url.split('/')[-1]
@@ -39,12 +46,25 @@ def create_iframe_playlist(playlist):
     """
     Creates a new I-frame playlist.
     """
+    try:
+        subprocess.check_output('ffprobe -version', stderr=subprocess.STDOUT,
+                                shell=True)
+    except subprocess.CalledProcessError:
+        raise DependencyError('FFmpeg not installed correctly')
+
     iframe_playlist = generate_m3u8_for_iframes()
 
     total_bytes = 0
     total_duration = 0
 
-    for segment in m3u8.load(playlist.absolute_uri).segments:
+    try:
+        stream = m3u8.load(playlist.absolute_uri)
+    except IOError:
+        raise PlaylistLoadError('Invalid stream url')
+    except AttributeError:
+        raise BadPlaylistError('Invalid playlist - no absolute uri')
+
+    for segment in stream.segments:
 
         iframe_segments, s_bytes, s_duration = create_iframe_segments(segment)
 
@@ -130,9 +150,7 @@ def get_segment_data(url):
     try:
         ts_data = all_data['packets_and_frames']
     except KeyError:
-        LOGGER.error('There was an error reading the transport '
-                     'stream data for %s', url)
-        raise
+        raise DataError('Could not read TS data for %s' % url)
 
     iframes = []
     packets_pos = []
