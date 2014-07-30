@@ -13,6 +13,7 @@ from iframeplaylistgenerator.exceptions import (
     PlaylistLoadError, BadPlaylistError, DataError
 )
 
+
 def read_file(file_loc):
     with open(file_loc) as myfile:
         return myfile.read()
@@ -27,6 +28,7 @@ IFRAME_PLAYLIST_400K = read_file(
 IFRAME_PLAYLIST_150K = read_file(
     SAMPLES_PATH + 'generated_playlists/bigbuckbunny-150k-iframes.m3u8'
 )
+
 
 class IframePlaylistGeneratorTestCase(unittest.TestCase):
 

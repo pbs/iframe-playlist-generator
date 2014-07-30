@@ -13,6 +13,7 @@ from .exceptions import (
     DependencyError, DataError
 )
 
+
 def update_for_iframes(url):
     """
     Returns an updated master playlist and new I-frame playlists
@@ -41,6 +42,7 @@ def update_for_iframes(url):
 
     result['master_content'] = master_playlist.dumps()
     return result
+
 
 def create_iframe_playlist(playlist):
     """
@@ -91,6 +93,7 @@ def create_iframe_playlist(playlist):
     return (new_iframe_playlist, {'uri': iframe_playlist_uri,
                                   'content': iframe_playlist.dumps()})
 
+
 def generate_m3u8_for_iframes():
     """
     Generates an M3U8 object to be used for an I-frame playlist
@@ -103,6 +106,7 @@ def generate_m3u8_for_iframes():
     result.is_i_frames_only = True
     result.is_endlist = True
     return result
+
 
 def create_iframe_segments(segment):
     """
@@ -142,6 +146,7 @@ def create_iframe_segments(segment):
 
     return iframe_segments, segment_bytes, segment_duration
 
+
 def get_segment_data(url):
     """
     Returns data about a transport stream.
@@ -168,6 +173,7 @@ def get_segment_data(url):
 
     return iframes, ts_data, packets_pos
 
+
 def run_ffprobe(filename):
     """
     Runs an ffprobe on a transport stream and
@@ -179,6 +185,7 @@ def run_ffprobe(filename):
                                shell=True, stdout=subprocess.PIPE)
     out = process.stdout.read().strip()
     return out
+
 
 def convert_codecs_for_iframes(codecs):
     """
