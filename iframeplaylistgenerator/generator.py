@@ -123,6 +123,9 @@ def create_iframe_segments(segment):
         for j, pos in enumerate(packets_pos):
 
             if j < len(packets_pos) - 1 and frame[1] == pos:
+                # We compared the output of our library to Apple's
+                # example streams, and we were off by 188 bytes
+                # for each I-frame byte-range.
                 pkt_size = int(packets_pos[j+1]) - int(pos) + 188
                 break
             else:
