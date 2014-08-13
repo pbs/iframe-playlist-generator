@@ -17,6 +17,8 @@ from .exceptions import (
 def update_for_iframes(url):
     """
     Returns an updated master playlist and new I-frame playlists
+
+    NOTE: code assumes that all files are relative
     """
     try:
         master_playlist = m3u8.load(url)
@@ -28,6 +30,7 @@ def update_for_iframes(url):
 
     master_playlist.iframe_playlists[:] = []
 
+    # take a look at the python urlparse module
     uri = url.split('/')[-1]
     result = {'master_uri': uri,
               'master_content': None,
@@ -49,6 +52,7 @@ def create_iframe_playlist(playlist):
     Creates a new I-frame playlist.
     """
     try:
+        # add ability to specify ffprobe location
         subprocess.check_output('ffprobe -version', stderr=subprocess.STDOUT,
                                 shell=True)
     except subprocess.CalledProcessError:
@@ -77,6 +81,8 @@ def create_iframe_playlist(playlist):
         total_duration += s_duration
 
     if total_bytes != 0 and total_duration != 0:
+        # is this calculation good enough for accurate
+        # bandwidth player downloading?
         iframe_bandwidth = str(int(total_bytes / total_duration * 8))
     else:
         return (None, None)
@@ -84,6 +90,8 @@ def create_iframe_playlist(playlist):
     iframe_codecs = convert_codecs_for_iframes(playlist.stream_info.codecs)
     stream_info = {'bandwidth': iframe_bandwidth,
                    'codecs': iframe_codecs}
+
+    # find a better way to insert '-iframes'
     iframe_playlist_uri = playlist.uri.replace('.m3u8', '-iframes.m3u8')
 
     new_iframe_playlist = m3u8.IFramePlaylist(base_uri=playlist.base_uri,
@@ -155,6 +163,8 @@ def get_segment_data(url):
     Returns data about a transport stream.
     """
     all_data = json.loads(run_ffprobe(url))
+
+    # use '.get()' or 'in'
     try:
         ts_data = all_data['packets_and_frames']
     except KeyError:
@@ -185,11 +195,13 @@ def run_ffprobe(filename):
     Runs an ffprobe on a transport stream and
     returns a string of the results in json format.
     """
+    # include stderr in Popen() and remove '2> /dev/null' ?
     bash_cmd = ('ffprobe -print_format json -show_packets -show_frames ' +
                 '%s 2> /dev/null')
     process = subprocess.Popen(bash_cmd % filename,
                                shell=True, stdout=subprocess.PIPE)
     out = process.stdout.read().strip()
+    # check for valid json output, return None if error
     return out
 
 
