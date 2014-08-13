@@ -23,7 +23,7 @@ def update_for_iframes(url):
     except IOError:
         raise PlaylistLoadError('Invalid url')
 
-    if not master_playlist.is_variant:
+    if not master_playlist or not master_playlist.is_variant:
         raise BadPlaylistError('Not a variant playlist')
 
     master_playlist.iframe_playlists[:] = []
@@ -84,7 +84,7 @@ def create_iframe_playlist(playlist):
     iframe_codecs = convert_codecs_for_iframes(playlist.stream_info.codecs)
     stream_info = {'bandwidth': iframe_bandwidth,
                    'codecs': iframe_codecs}
-    iframe_playlist_uri = playlist.uri.replace('.', '-iframes.')
+    iframe_playlist_uri = playlist.uri.replace('.m3u8', '-iframes.m3u8')
 
     new_iframe_playlist = m3u8.IFramePlaylist(base_uri=playlist.base_uri,
                                               uri=iframe_playlist_uri,
@@ -165,11 +165,14 @@ def get_segment_data(url):
 
     for datum in ts_data:
 
+        # we need to retrieve the time, position, and size of each I-frame
         if ('pkt_pos' in datum.keys() and 'pict_type' in datum.keys() and
                 datum['pict_type'] == 'I' and datum['type'] == 'frame'):
             iframes.append((datum['best_effort_timestamp_time'],
                             datum['pkt_pos'], datum['pkt_size']))
 
+        # we need to retrieve the position of each packet to be used
+        # in calculating the actual size of each I-frame
         elif ('pos' in datum.keys() and datum['type'] == 'packet' and
               datum['codec_type'] == 'video'):
             packets_pos.append(datum['pos'])
