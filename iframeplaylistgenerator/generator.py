@@ -3,8 +3,9 @@ Takes a variant m3u8 playlist, creates I-frame playlists for it, and
 creates an updated master playlist with links to the new I-frame playlists.
 """
 
+import csv
+from cStringIO import StringIO
 import subprocess
-import json
 
 import m3u8
 
@@ -12,6 +13,9 @@ from .exceptions import (
     PlaylistLoadError, BadPlaylistError,
     DependencyError, DataError
 )
+
+
+__all__ = ['update_for_iframes', 'extract_iframe_metadata']
 
 
 def update_for_iframes(url):
@@ -112,82 +116,75 @@ def create_iframe_segments(segment):
     """
     Takes a transport stream segment and returns I-frame segments for it
     """
-    iframes, ts_data, packets_pos = get_segment_data(segment.absolute_uri)
+    iframes_total_size = 0
+    video_duration = 0
+    iframe_segments = list()
 
-    segment_bytes = 0
-    segment_duration = 0
-    iframe_segments = []
+    iframes_and_format = csv.reader(StringIO(
+        extract_iframe_metadata(segment.absolute_uri)))
 
-    for i, frame in enumerate(iframes):
-
-        for j, pos in enumerate(packets_pos):
-
-            if j < len(packets_pos) - 1 and frame[1] == pos:
-                # We compared the output of our library to Apple's
-                # example streams, and we were off by 188 bytes
-                # for each I-frame byte-range.
-                pkt_size = int(packets_pos[j+1]) - int(pos) + 188
-                break
-            else:
-                pkt_size = frame[2]
-
-        byterange = str(pkt_size) + '@' + frame[1]
-
-        if i < len(iframes) - 1:
-            extinf = float(iframes[i+1][0]) - float(frame[0])
+    prev_iframe_displayed_at = None
+    for row in iframes_and_format:
+        decider = row[0]
+        if decider == 'frame':
+            iframe_displayed_at = float(row[1])
+            iframe_position = int(row[2])
+            iframe_size = int(row[3])
+            if prev_iframe_displayed_at is not None:
+                iframe_segments[-1].duration = (iframe_displayed_at -
+                                                prev_iframe_displayed_at)
+            iframe_segment = m3u8.Segment(
+                segment.uri,
+                segment.base_uri,
+                byterange='{}@{}'.format(iframe_size, iframe_position)
+            )
+            iframe_segments.append(iframe_segment)
+            iframes_total_size += iframe_size
+            prev_iframe_displayed_at = iframe_displayed_at
+        elif decider == 'format':
+            video_started_at = float(row[1])
+            video_duration = float(row[2])
+            if prev_iframe_displayed_at is not None:
+                iframe_segments[-1].duration = (
+                    video_started_at + video_duration -
+                    prev_iframe_displayed_at
+                )
         else:
-            last_frame_time = ts_data[-1]['best_effort_timestamp_time']
-            extinf = float(last_frame_time) - float(frame[0])
+            raise ValueError('Received an invalid row type: got "{}", '
+                             'expected "format" or "frame".'.format(decider))
 
-        segment_bytes += int(frame[2])
-        segment_duration += extinf
-
-        iframe_segments.append(m3u8.Segment(segment.uri,
-                                            segment.base_uri,
-                                            duration=extinf,
-                                            byterange=byterange))
-
-    return iframe_segments, segment_bytes, segment_duration
+    return iframe_segments, iframes_total_size, video_duration
 
 
-def get_segment_data(url):
+def extract_iframe_metadata(filename):
     """
-    Returns data about a transport stream.
+    Runs ffprobe on the give file (be it local or remote) and returns a CSV
+    with the key frames (I-frames) identified in the video. The last line in
+    the CSV contains details about the video file as a whole.
+
+    CSV format:
+    frame,<best_effort_timestamp_time>,<pkt_pos>,<pkt_size>,<pict_type>
+    ...
+    format,<start_time>,<duration>
     """
-    all_data = json.loads(run_ffprobe(url))
-    try:
-        ts_data = all_data['packets_and_frames']
-    except KeyError:
-        raise DataError('Could not read TS data for %s' % url)
-
-    iframes = []
-    packets_pos = []
-
-    for datum in ts_data:
-
-        # we need to retrieve the time, position, and size of each I-frame
-        if ('pkt_pos' in datum.keys() and 'pict_type' in datum.keys() and
-                datum['pict_type'] == 'I' and datum['type'] == 'frame'):
-            iframes.append((datum['best_effort_timestamp_time'],
-                            datum['pkt_pos'], datum['pkt_size']))
-
-        # we need to retrieve the position of each packet to be used
-        # in calculating the actual size of each I-frame
-        elif ('pos' in datum.keys() and datum['type'] == 'packet' and
-              datum['codec_type'] == 'video'):
-            packets_pos.append(datum['pos'])
-
-    return iframes, ts_data, packets_pos
-
-
-def run_ffprobe(filename):
-    """
-    Runs an ffprobe on a transport stream and
-    returns a string of the results in json format.
-    """
-    bash_cmd = ('ffprobe -print_format json -show_packets -show_frames ' +
-                '%s 2> /dev/null')
-    process = subprocess.Popen(bash_cmd % filename,
+    bash_cmd = (
+        'ffprobe'
+        ' -print_format csv'
+        ' -select_streams v'  # query only the video stream (exclude audio)
+        ' -show_frames'
+        ' -show_format'  # used to determine the duration of the I-frames
+        ' -show_entries frame=best_effort_timestamp_time,pkt_pos,pkt_size,pict_type'  # noqa
+        ' -show_entries format=duration,start_time '
+        '{file_uri} '
+        # throw away the header that ffmpeg utils print by default
+        '2> /dev/null '
+        # select only the I-frames and the format data
+        '| grep "\(I$\|^format\)" '
+        # exclude data that does not provide complete information. E.g: AAC
+        # files have an I-frame in the video stream that we should ignore.
+        '| grep -v "N/A"'
+    )
+    process = subprocess.Popen(bash_cmd.format(file_uri=filename),
                                shell=True, stdout=subprocess.PIPE)
     out = process.stdout.read().strip()
     return out
