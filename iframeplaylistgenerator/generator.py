@@ -5,7 +5,7 @@ creates an updated master playlist with links to the new I-frame playlists.
 
 import csv
 from cStringIO import StringIO
-import subprocess
+from subprocess32 import check_output, Popen, CalledProcessError, PIPE
 
 import m3u8
 
@@ -53,9 +53,8 @@ def create_iframe_playlist(playlist):
     Creates a new I-frame playlist.
     """
     try:
-        subprocess.check_output('ffprobe -version', stderr=subprocess.STDOUT,
-                                shell=True)
-    except subprocess.CalledProcessError:
+        check_output(['ffprobe', '-version'])
+    except (OSError, CalledProcessError):
         raise DependencyError('FFmpeg not installed correctly')
 
     iframe_playlist = generate_m3u8_for_iframes()
@@ -167,27 +166,43 @@ def extract_iframe_metadata(filename):
     ...
     format,<start_time>,<duration>
     """
-    bash_cmd = (
-        'ffprobe'
-        ' -print_format csv'
-        ' -select_streams v'  # query only the video stream (exclude audio)
-        ' -show_frames'
-        ' -show_format'  # used to determine the duration of the I-frames
-        ' -show_entries frame=best_effort_timestamp_time,pkt_pos,pkt_size,pict_type'  # noqa
-        ' -show_entries format=duration,start_time '
-        '{file_uri} '
-        # throw away the header that ffmpeg utils print by default
-        '2> /dev/null '
-        # select only the I-frames and the format data
-        '| grep "\(I$\|^format\)" '
-        # exclude data that does not provide complete information. E.g: AAC
-        # files have an I-frame in the video stream that we should ignore.
-        '| grep -v "N/A"'
+    ffprobe = Popen(
+        ['ffprobe',
+         '-print_format', 'csv',
+         '-select_streams', 'v',
+         '-show_frames',
+         '-show_entries',
+         'frame=best_effort_timestamp_time,pkt_pos,pkt_size,pict_type',
+         '-show_format',
+         '-show_entries', 'format=duration,start_time',
+         filename],
+        stdout=PIPE,
+        stderr=PIPE
     )
-    process = subprocess.Popen(bash_cmd.format(file_uri=filename),
-                               shell=True, stdout=subprocess.PIPE)
-    out = process.stdout.read().strip()
-    return out
+    grep_iframes_format = Popen(['grep', r'\(I$\|^format\)'],
+                                stdin=ffprobe.stdout,
+                                stdout=PIPE,
+                                stderr=PIPE)
+    exclude_unavailable_info = Popen(['grep', '-v', r'N/A'],
+                                     stdin=grep_iframes_format.stdout,
+                                     stdout=PIPE,
+                                     stderr=PIPE)
+    ffprobe.stdout.close()
+    grep_iframes_format.stdout.close()
+    iframes_and_format, _ = exclude_unavailable_info.communicate()
+    ffprobe_status = ffprobe.wait()
+    grep_iframes_format.wait()
+
+    if ffprobe_status == 1:
+        raise DataError(
+            'Could not read TS data for "{}". Details: {}'.format(
+                filename,
+                # ffprobe outputs extra information to stderr before the actual
+                # error message, which is on the line before last.
+                ffprobe.stderr.read().rstrip().rsplit('\n', 1)[-1]
+            )
+        )
+    return iframes_and_format
 
 
 def convert_codecs_for_iframes(codecs):
