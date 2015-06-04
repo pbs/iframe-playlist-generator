@@ -1,13 +1,11 @@
 import os
 import unittest
-import json
 
 import m3u8
 
 from iframeplaylistgenerator.generator import (
     update_for_iframes, create_iframe_playlist,
-    run_ffprobe, convert_codecs_for_iframes,
-    get_segment_data
+    extract_iframe_metadata, convert_codecs_for_iframes,
 )
 from iframeplaylistgenerator.exceptions import (
     PlaylistLoadError, BadPlaylistError, DataError
@@ -24,10 +22,10 @@ MASTER_PLAYLIST = read_file(
 )
 IFRAME_PLAYLIST_400K = read_file(
     SAMPLES_PATH + 'generated_playlists/bigbuckbunny-400k-iframes.m3u8'
-)
+).strip()
 IFRAME_PLAYLIST_150K = read_file(
     SAMPLES_PATH + 'generated_playlists/bigbuckbunny-150k-iframes.m3u8'
-)
+).strip()
 
 
 class IframePlaylistGeneratorTestCase(unittest.TestCase):
@@ -56,13 +54,6 @@ class IframePlaylistGeneratorTestCase(unittest.TestCase):
                 'not a playlist'
             )
 
-    def test_get_segment_data_from_empty_ts_file_returns_error(self):
-        with self.assertRaisesRegexp(DataError,
-                                     'Could not read TS data'):
-            get_segment_data(
-                SAMPLES_PATH + 'original_video/bigbuckbunny-with-no-data.ts'
-            )
-
     def test_convert_codecs_for_iframes(self):
         results = convert_codecs_for_iframes('avc1.4d001f, mp4a.40.5')
         self.assertEqual('avc1.4d001f', results)
@@ -71,21 +62,22 @@ class IframePlaylistGeneratorTestCase(unittest.TestCase):
         results = convert_codecs_for_iframes(None)
         self.assertEqual(None, results)
 
-    def test_run_ffprobe(self):
-        results = json.loads(
-            run_ffprobe(
-                SAMPLES_PATH + 'original_video/bigbuckbunny-150k-00001.ts'
-            )
-        )
-        json_data = json.loads(
-            read_file(
-                SAMPLES_PATH + 'json_files/bigbuckbunny-150k-00001.json'
-            )
+    def test_extract_iframe_metadata(self):
+        results = extract_iframe_metadata(
+            SAMPLES_PATH + 'original_video/bigbuckbunny-150k-00001.ts'
         )
         self.assertEqual(
-            len(json_data['packets_and_frames']),
-            len(results['packets_and_frames'])
+            'frame,10.000000,3008,175,I\n'
+            'frame,19.266667,188376,18539,I\n'
+            'format,9.881000,10.119000\n',
+            results
         )
+
+    def test_extract_iframe_metadata_for_empty_file_returns_error(self):
+        with self.assertRaises(DataError):
+            extract_iframe_metadata(
+                SAMPLES_PATH + 'original_video/bigbuckbunny-with-no-data.ts'
+            )
 
     def test_create_iframe_playlist(self):
         iframe_playlist_uri = 'bigbuckbunny-400k-iframes.m3u8'
