@@ -122,31 +122,62 @@ def create_iframe_segments(segment):
     iframes_and_format = csv.reader(StringIO(
         extract_iframe_metadata(segment.absolute_uri)))
 
-    prev_iframe_displayed_at = None
+    # Keep the details of the last processed I-frame packet which need to be
+    # used in computing parameters like size and time span.
+    # When no longer needed (they have been used in computing the desired
+    # parameters), these attributes need to be nullified.
+    prev_iframe = {'displayed_at': None,
+                   'position': None,
+                   'size': None}
     for row in iframes_and_format:
         decider = row[0]
         if decider == 'frame':
-            iframe_displayed_at = float(row[1])
-            iframe_position = int(row[2])
-            iframe_size = int(row[3])
-            if prev_iframe_displayed_at is not None:
-                iframe_segments[-1].duration = (iframe_displayed_at -
-                                                prev_iframe_displayed_at)
-            iframe_segment = m3u8.Segment(
-                segment.uri,
-                segment.base_uri,
-                byterange='{}@{}'.format(iframe_size, iframe_position)
-            )
-            iframe_segments.append(iframe_segment)
-            iframes_total_size += iframe_size
-            prev_iframe_displayed_at = iframe_displayed_at
+            frame_displayed_at = float(row[1])
+            frame_position = int(row[2])
+            frame_size = int(row[3])
+            frame_type = row[4]
+
+            if prev_iframe['position']:
+                # Compute the size of the previous I-frame packet relative to
+                # the current packet.
+                prev_iframe_size = frame_position - prev_iframe['position']
+                # Compute the packet size using the positions of consecutive
+                # frames because the one provided by ffprobe is not accurate.
+                iframe_segments[-1].byterange = '{}@{}'.format(
+                    prev_iframe_size, prev_iframe['position']
+                )
+                iframes_total_size += prev_iframe_size
+                prev_iframe['position'] = None
+
+            if frame_type == 'I':
+                if prev_iframe['displayed_at']:
+                    # Compute the time span of the previous I-frame relative to
+                    # the current I-frame packet.
+                    iframe_segments[-1].duration = (
+                        frame_displayed_at - prev_iframe['displayed_at'])
+                    prev_iframe['displayed_at'] = None
+                iframe_segment = m3u8.Segment(
+                    segment.uri,
+                    segment.base_uri
+                )
+                iframe_segments.append(iframe_segment)
+                prev_iframe = {'displayed_at': frame_displayed_at,
+                               'position': frame_position,
+                               'size': frame_size}
         elif decider == 'format':
             video_started_at = float(row[1])
             video_duration = float(row[2])
-            if prev_iframe_displayed_at is not None:
+            if prev_iframe['displayed_at']:
+                # The last I-frame will span until the end of the segment.
                 iframe_segments[-1].duration = (
                     video_started_at + video_duration -
-                    prev_iframe_displayed_at
+                    prev_iframe['displayed_at']
+                )
+            if prev_iframe['position']:
+                # In case the last packet is an I-frame (probably an edge-case)
+                # use the packet size provided by ffprobe.
+                iframe_segments[-1].byterange = '{}@{}'.format(
+                    prev_iframe['size'], prev_iframe['position']
                 )
         else:
             raise ValueError('Received an invalid row type: got "{}", '
@@ -179,10 +210,12 @@ def extract_iframe_metadata(filename):
         stdout=PIPE,
         stderr=PIPE
     )
-    grep_iframes_format = Popen(['grep', r'\(I$\|^format\)'],
-                                stdin=ffprobe.stdout,
-                                stdout=PIPE,
-                                stderr=PIPE)
+    grep_iframes_format = Popen(
+        ['grep', '-A', '1', '--no-group-separator', r'\(I$\|^format\)'],
+        stdin=ffprobe.stdout,
+        stdout=PIPE,
+        stderr=PIPE
+    )
     exclude_unavailable_info = Popen(['grep', '-v', r'N/A'],
                                      stdin=grep_iframes_format.stdout,
                                      stdout=PIPE,
