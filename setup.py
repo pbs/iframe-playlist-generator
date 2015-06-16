@@ -9,5 +9,5 @@ setup(
     url='https://github.com/pbs/iframe-playlist-generator',
     description='HLS I-frame playlist generator',
     long_description=open('README.rst').read(),
-    install_requires=['m3u8==0.1.8', 'subprocess32==3.2.6'],
+    install_requires=['m3u8==0.1.9', 'subprocess32==3.2.6'],
 )
