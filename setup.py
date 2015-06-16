@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='iframe-playlist-generator',
-    version='0.1.2',
+    version='0.1.3',
     author='Peter Norton',
     author_email='peter@nortoncrew.com',
     packages=['iframeplaylistgenerator'],
