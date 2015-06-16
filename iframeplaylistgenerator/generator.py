@@ -133,59 +133,118 @@ def create_iframe_segments(segment):
     for row in iframes_and_format:
         decider = row[0]
         if decider == 'frame':
-            frame_displayed_at = float(row[1])
-            frame_position = int(row[2])
-            frame_size = int(row[3])
-            frame_type = row[4]
-
-            if prev_iframe['position']:
-                # Compute the size of the previous I-frame packet relative to
-                # the current packet.
-                prev_iframe_size = frame_position - prev_iframe['position']
-                # Compute the packet size using the positions of consecutive
-                # frames because the one provided by ffprobe is not accurate.
-                iframe_segments[-1].byterange = '{}@{}'.format(
-                    prev_iframe_size, prev_iframe['position']
-                )
-                iframes_total_size += prev_iframe_size
-                prev_iframe['position'] = None
-
-            if frame_type == 'I':
-                if prev_iframe['displayed_at']:
-                    # Compute the time span of the previous I-frame relative to
-                    # the current I-frame packet.
-                    iframe_segments[-1].duration = (
-                        frame_displayed_at - prev_iframe['displayed_at'])
-                    prev_iframe['displayed_at'] = None
-                iframe_segment = m3u8.Segment(
-                    segment.uri,
-                    segment.base_uri
-                )
-                iframe_segments.append(iframe_segment)
-                prev_iframe = {'displayed_at': frame_displayed_at,
-                               'position': frame_position,
-                               'size': frame_size}
+            prev_iframe, iframes_total_size = _process_video_frame(
+                row, prev_iframe, segment.uri, segment.base_uri,
+                iframe_segments, iframes_total_size
+            )
         elif decider == 'format':
-            video_started_at = float(row[1])
-            video_duration = float(row[2])
-            if prev_iframe['displayed_at']:
-                # The last I-frame will span until the end of the segment.
-                iframe_segments[-1].duration = (
-                    video_started_at + video_duration -
-                    prev_iframe['displayed_at']
-                )
-            if prev_iframe['position']:
-                # In case the last packet is an I-frame (probably an edge-case)
-                # use the packet size provided by ffprobe.
-                iframe_segments[-1].byterange = '{}@{}'.format(
-                    prev_iframe['size'], prev_iframe['position']
-                )
-                iframes_total_size += prev_iframe['size']
+            iframes_total_size, video_duration = _process_video_details(
+                row, prev_iframe, iframe_segments, iframes_total_size)
         else:
             raise ValueError('Received an invalid row type: got "{}", '
                              'expected "format" or "frame".'.format(decider))
 
     return iframe_segments, iframes_total_size, video_duration
+
+
+def _process_video_frame(row, prev_iframe, segment_uri, segment_base_uri,
+                         iframe_segments, iframes_total_size):
+    """
+    Extract the position, size and type of the frame.
+    Based on the type of the frame:
+    - modify the previous I-frame in the list with the given data, if necessary
+    - add a new I-frame to the list and refresh the data in the `prev_iframe`
+
+    :param row: - the frame information retrieved from ffprobe using the
+    `-show_frame` flag with the following filter for entries
+    `best_effort_timestamp_time,pkt_pos,pkt_size,pict_type`
+    :param prev_iframe: - the information required from the previously
+    processed Intra-frame (key-frame)
+    :param segment_uri: - the URI of the segment from which the frames have
+    been extracted. Used in creating the new I-frame segment.
+    :param segment_base_uri: - the base URI of the segment from which the
+    frames have been extracted. Used in creating the new I-frame segment.
+    :param iframe_segments: - the list of I-frame segments created so far.
+    Depending on the situation, the last element of the list will be modified,
+    and/or a new element will be added.
+    :param iframes_total_size: - the current total size of the *complete*
+    I-frames found in the `iframe_segments` list.
+
+    :returns: - the previous I-frame with updated fields. Some fields may be
+    removed in order to signal that they should not be used in the future.
+              - the new `iframes_total_size` - updated in case the size of
+    the last I-frame could be set.
+    """
+    frame_displayed_at = float(row[1])
+    frame_position = int(row[2])
+    frame_size = int(row[3])
+    frame_type = row[4]
+
+    if prev_iframe['position']:
+        # Compute the size of the previous I-frame packet relative to
+        # the current packet.
+        prev_iframe_size = frame_position - prev_iframe['position']
+        # Compute the packet size using the positions of consecutive
+        # frames because the one provided by ffprobe is not accurate.
+        iframe_segments[-1].byterange = '{}@{}'.format(prev_iframe_size,
+                                                       prev_iframe['position'])
+        iframes_total_size += prev_iframe_size
+        prev_iframe['position'] = None
+
+    if frame_type == 'I':
+        if prev_iframe['displayed_at']:
+            # Compute the time span of the previous I-frame relative to
+            # the current I-frame packet.
+            iframe_segments[-1].duration = (frame_displayed_at -
+                                            prev_iframe['displayed_at'])
+            prev_iframe['displayed_at'] = None
+        iframe_segment = m3u8.Segment(segment_uri, segment_base_uri)
+        iframe_segments.append(iframe_segment)
+        prev_iframe = {'displayed_at': frame_displayed_at,
+                       'position': frame_position,
+                       'size': frame_size}
+
+    return prev_iframe, iframes_total_size
+
+
+def _process_video_details(row, prev_iframe, iframe_segments,
+                           iframes_total_size):
+    """
+    Extract the total duration of the video segment.
+    Modify the span of the last I-frame, and its byterange, if the I-frame was
+    the last frame in the video.
+
+    :param row: - the video information retrieved from ffprobe using the
+    `-show_format` flag with the following entry filter `duration,start_time`
+    :param prev_iframe: - the information required from the previously
+    processed Intra-frame (key-frame)
+    :param iframe_segments: - the list of I-frame segments created so far.
+    The duration of the last I-frame will be update, and, if the last I-frame
+    was not followed by another frame, its `byterange` will be updated to
+    its packet size.
+    :param iframes_total_size: - the current total size of the *complete*
+    I-frames found in the `iframe_segments` list.
+
+    :returns: - the new `iframes_total_size` - updated in case the size of
+    the last I-frame could be set
+              - the video duration
+    """
+    video_started_at = float(row[1])
+    video_duration = float(row[2])
+    if prev_iframe['displayed_at']:
+        # The last I-frame will span until the end of the segment.
+        iframe_segments[-1].duration = (
+            video_started_at + video_duration -
+            prev_iframe['displayed_at']
+        )
+    if prev_iframe['position']:
+        # In case the last packet is an I-frame (probably an edge-case)
+        # use the packet size provided by ffprobe.
+        iframe_segments[-1].byterange = '{}@{}'.format(
+            prev_iframe['size'], prev_iframe['position']
+        )
+        iframes_total_size += prev_iframe['size']
+    return iframes_total_size, video_duration
 
 
 def extract_iframe_metadata(filename):
