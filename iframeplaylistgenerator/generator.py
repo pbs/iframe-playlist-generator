@@ -5,6 +5,7 @@ creates an updated master playlist with links to the new I-frame playlists.
 
 import csv
 from cStringIO import StringIO
+from math import ceil
 from subprocess32 import check_output, Popen, CalledProcessError, PIPE
 
 import m3u8
@@ -80,12 +81,12 @@ def create_iframe_playlist(playlist):
         total_duration += s_duration
 
     if total_bytes != 0 and total_duration != 0:
-        iframe_bandwidth = str(int(total_bytes / total_duration * 8))
+        iframe_bandwidth = int(ceil(total_bytes / total_duration * 8))
     else:
         return (None, None)
 
     iframe_codecs = convert_codecs_for_iframes(playlist.stream_info.codecs)
-    stream_info = {'bandwidth': iframe_bandwidth,
+    stream_info = {'bandwidth': str(iframe_bandwidth),
                    'codecs': iframe_codecs}
     iframe_playlist_uri = playlist.uri.replace('.m3u8', '-iframes.m3u8')
 
@@ -179,6 +180,7 @@ def create_iframe_segments(segment):
                 iframe_segments[-1].byterange = '{}@{}'.format(
                     prev_iframe['size'], prev_iframe['position']
                 )
+                iframes_total_size += prev_iframe['size']
         else:
             raise ValueError('Received an invalid row type: got "{}", '
                              'expected "format" or "frame".'.format(decider))

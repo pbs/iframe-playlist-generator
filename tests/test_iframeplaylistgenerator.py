@@ -68,7 +68,9 @@ class IframePlaylistGeneratorTestCase(unittest.TestCase):
         )
         self.assertEqual(
             'frame,10.000000,3008,175,I\n'
+            'frame,10.066667,3196,385,P\n'
             'frame,19.266667,188376,18539,I\n'
+            'frame,19.333333,210184,148,P\n'
             'format,9.881000,10.119000\n',
             results
         )
